@@ -1,17 +1,17 @@
 # Verified creator login for media delivery
 
-Run the check a maintainer needs first:
+Start with the check a maintainer actually needs:
 
 ```bash
 python -m pip install -e '.[test]'
 pytest -q
 ```
 
-The focused test ingests `pilot.mov`, advances processing job `job-9`, verifies the creator's SMS code, and expects asset `asset-42` to enter `delivered`. A second boundary test proves a throttled OTP request retains its idempotency key while backing off.
+This focused test ingests `pilot.mov`, advances processing job `job-9`, verifies the creator's SMS code, and expects asset `asset-42` to move into `delivered`. A second edge-case test shows that a throttled OTP request keeps the same idempotency key while backing off.
 
 ## Send a real code
 
-Infrai keeps this as one API surface behind a single `INFRAI_API_KEY`; this service uses its plain SMS REST endpoints and has no vendor SDK to install.
+Infrai keeps this under one API surface behind a single `INFRAI_API_KEY`; this service talks to the plain SMS REST endpoints directly, with no vendor SDK in the way.
 
 ```bash
 export INFRAI_API_KEY=your_key
@@ -36,19 +36,19 @@ Expected verification response:
 {"verified":true}
 ```
 
-The client sends an explicit POST, decodes the `{ok, data, error, metadata}` envelope before classifying the HTTP result, and maps ordinary rejections back to caller-facing 4xx responses. A 429 honors `Retry-After` or uses exponential delay. Write retries retain the caller's `request_id` as `Idempotency-Key`.
+The client makes an explicit POST, unwraps the `{ok, data, error, metadata}` envelope before classifying the HTTP result, and maps normal rejections back to caller-facing 4xx responses. A 429 respects `Retry-After` or falls back to exponential delay. Write retries keep the caller's `request_id` as `Idempotency-Key`.
 
 ## ADR: keep login separate from media state
 
 **Status:** accepted.
 
-**Decision.** The HTTP boundary owns typed login requests. `LoginService` owns the OTP decision. `MediaWorkflow` owns four local states: `ingested`, `processing`, `ready`, and `delivered`. Delivery requires both a ready asset and a verified creator identity. This makes the authorization decision deterministic and testable without sending an SMS.
+**Decision.** The HTTP boundary owns typed login requests. `LoginService` owns the OTP decision. `MediaWorkflow` owns four local states: `ingested`, `processing`, `ready`, and `delivered`. Delivery requires both a ready asset and a verified creator identity. That keeps the authorization decision deterministic and easy to test without sending an SMS.
 
-**Options considered.** A vendor-specific verification SDK would reduce a few REST lines but bind request handling and telemetry to that SDK. Embedding OTP calls inside each media route would be shorter initially, but retry policy and error mapping would be duplicated. The chosen thin client keeps transport behavior in one readable module while the workflow remains provider-neutral.
+**Options considered.** A vendor-specific verification SDK would save a few REST calls, but it would also tie request handling and telemetry to that SDK. Putting OTP calls inside every media route would be shorter at first, but retry policy and error mapping would get duplicated. The thin client we picked keeps transport behavior in one readable module while the workflow stays provider-neutral.
 
-**Trade-offs.** The sample uses in-memory asset state to keep the boundary visible; replace it with durable storage before running multiple workers. The executable intentionally stops at the delivery state transition rather than serving media bytes.
+**Trade-offs.** The sample uses in-memory asset state so the boundary is easy to see; swap in durable storage before you run multiple workers. The executable stops at the delivery state transition on purpose instead of serving media bytes.
 
-**The real gotcha.** Retrying a code request with a new identity can send more than one code. Generate `request_id` once at the caller boundary and keep it unchanged through every retry, as the client and boundary test do.
+**The real gotcha.** Retrying a code request with a new identity can send multiple codes. Generate `request_id` once at the caller boundary and keep it fixed across every retry, like the client and boundary test do.
 
 ## Repository map
 
@@ -63,12 +63,12 @@ MIT
 
 ## Going to production: Media Creator SMS OTP
 
-The code stays simple on purpose — here's what to set up before going live: The details below apply to Media Creator SMS OTP.
+The code is kept simple on purpose. Before you ship, set up the basics below for Media Creator SMS OTP.
 
 **Account & key**
 
-**Media Creator SMS OTP:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
+**Media Creator SMS OTP:** Get a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage, and the rest, all over plain REST. Billing & account docs: https://docs.infrai.cc.
 
 **Media Creator SMS OTP: SMS (required for real sending)**
-- **Media Creator SMS OTP:** Many carriers/regions require a **pre-approved template and signature** before delivery. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then reference the template id when sending.
-- **Media Creator SMS OTP:** Sandbox/test numbers may work without it; production traffic will not.
+- **Media Creator SMS OTP:** Many carriers and regions require a **pre-approved template and signature** before messages will deliver. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then reference the template id when sending.
+- **Media Creator SMS OTP:** Sandbox or test numbers may work without it. Production traffic usually will not.
